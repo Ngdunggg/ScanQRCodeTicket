@@ -4,11 +4,14 @@ import {
   View,
   TouchableOpacity,
   Dimensions,
+  ActivityIndicator,
+  Alert,
 } from "react-native";
 import React, { useState, useEffect } from "react";
 import { CameraView, Camera } from "expo-camera";
-
-const { width } = Dimensions.get("window");
+import { ticketApi } from "./api/ticketService";
+import { extractTicketId, isValidTicketQR } from "./utils/qrHelper";
+import { getErrorMessage } from "./utils/errorHandler";
 
 export default function QRScanner({ navigation }) {
   const [hasPermission, setHasPermission] = useState(null);
@@ -32,44 +35,47 @@ export default function QRScanner({ navigation }) {
     return unsubscribe;
   }, [navigation]);
 
-  const handleBarcodeScanned = ({ type, data }) => {
-    if (isScanning && !isProcessing) {
-      setIsProcessing(true);
-      setIsScanning(false);
+  const resetScanner = () => {
+    setIsScanning(true);
+    setIsProcessing(false);
+  };
 
-      try {
-        // Làm sạch dữ liệu: loại bỏ các ký tự điều khiển không hợp lệ
-        const cleanedData = data.replace(/[\u0000-\u0008\u000B-\u001F]/g, "");
+  const handleBarcodeScanned = async ({ data }) => {
+    if (!isScanning || isProcessing) return;
 
-        console.log("QR Data:", cleanedData);
+    setIsProcessing(true);
+    setIsScanning(false);
 
-        // Kiểm tra nếu là URL hoặc text thông thường (không phải JSON)
-        if (
-          cleanedData.startsWith("http") ||
-          cleanedData.startsWith("www") ||
-          (!cleanedData.trim().startsWith("[") &&
-            !cleanedData.trim().startsWith("{"))
-        ) {
-          alert("QR code này không phải định dạng vé!\nData: " + cleanedData);
-          setIsScanning(true);
-          setIsProcessing(false);
-          return;
-        }
-
-        // Parse JSON
-        const parsedData = JSON.parse(cleanedData);
-        const ticketData = Array.isArray(parsedData)
-          ? parsedData[0]
-          : parsedData;
-
-        navigation.navigate("TicketInfo", { ticketData });
-      } catch (error) {
-        console.error("Invalid QR code data:", error);
-        console.error("Data was:", data);
-        alert("Mã QR không hợp lệ!\nVui lòng quét mã QR vé sự kiện");
-        setIsScanning(true);
-        setIsProcessing(false);
+    try {
+      // Validate and extract ticket ID
+      if (!isValidTicketQR(data)) {
+        Alert.alert("Lỗi", "QR code này không phải định dạng vé!");
+        resetScanner();
+        return;
       }
+
+      const ticketId = extractTicketId(data);
+      if (!ticketId) {
+        Alert.alert("Lỗi", "Không tìm thấy ID vé trong mã QR!");
+        resetScanner();
+        return;
+      }
+
+      // Fetch ticket data
+      const ticketData = await ticketApi.getTicketInfo(ticketId);
+
+      if (!ticketData.ticket_item) {
+        Alert.alert("Lỗi", "Không tìm thấy thông tin vé.");
+        resetScanner();
+        return;
+      }
+
+      // Navigate to ticket info screen
+      navigation.navigate("TicketInfo", { ticketData });
+    } catch (error) {
+      const errorMessage = getErrorMessage(error);
+      Alert.alert("Lỗi", errorMessage);
+      resetScanner();
     }
   };
 
@@ -117,6 +123,12 @@ export default function QRScanner({ navigation }) {
       <View style={styles.scannerOverlay}>
         <View style={styles.scannerBox} />
         <Text style={styles.instructionText}>Hướng camera vào mã QR</Text>
+        {isProcessing && (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#667eea" />
+            <Text style={styles.loadingText}>Đang xử lý...</Text>
+          </View>
+        )}
       </View>
     </View>
   );
@@ -203,5 +215,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 20,
+  },
+  loadingContainer: {
+    marginTop: 40,
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.7)",
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    borderRadius: 20,
+  },
+  loadingText: {
+    color: "white",
+    fontSize: 16,
+    marginTop: 10,
+    fontWeight: "600",
   },
 });

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   StyleSheet,
   Text,
@@ -6,19 +6,14 @@ import {
   TouchableOpacity,
   ScrollView,
   Dimensions,
+  ActivityIndicator,
+  Alert,
 } from "react-native";
+import { TICKET_STATUS, TicketStatus } from "./common";
+import { ApiTicketResponse, ticketApi } from "./api/ticketService";
+import { getErrorMessage } from "./utils/errorHandler";
 
 const { width } = Dimensions.get("window");
-
-export const TICKET_STATUS = {
-  EXPIRED: "expired",
-  UNUSED: "unused",
-  USED: "used",
-};
-export type TicketStatus =
-  | typeof TICKET_STATUS.USED
-  | typeof TICKET_STATUS.EXPIRED
-  | typeof TICKET_STATUS.UNUSED;
 
 export default function TicketInfo({
   route,
@@ -27,12 +22,17 @@ export default function TicketInfo({
   route: any;
   navigation: any;
 }) {
-  const { ticketData } = route.params;
+  const { ticketData: initialTicketData }: { ticketData: ApiTicketResponse } =
+    route.params;
+  const [ticketData, setTicketData] =
+    useState<ApiTicketResponse>(initialTicketData);
+  const [isConfirming, setIsConfirming] = useState(false);
 
-  const formatDate = (dateString: string) => {
+  const formatDate = (dateString: string | Date) => {
     if (!dateString) return "N/A";
     try {
-      const date = new Date(dateString);
+      const date =
+        dateString instanceof Date ? dateString : new Date(dateString);
       return date.toLocaleDateString("vi-VN", {
         year: "numeric",
         month: "long",
@@ -41,31 +41,67 @@ export default function TicketInfo({
         minute: "2-digit",
       });
     } catch {
-      return dateString;
+      return String(dateString);
     }
   };
 
-  const handleConfirm = () => {
-    console.log("Vé đã được xác nhận:", ticketData); // TODO: Implement API call to confirm ticket
-    navigation.goBack();
+  // Extract data from API response
+  const ticket = ticketData?.ticket_item;
+  const eventItems = ticketData?.event_items;
+  const event = Array.isArray(eventItems) ? eventItems[0] : eventItems;
+
+  const eventName = event?.title || "N/A";
+  const ticketTypeName = ticket?.ticket_types?.name || "Không có loại vé";
+  const serialNumber = ticket?.serial_number || "N/A";
+  const ticketId = ticket?.id || "N/A";
+  const ticketStatus: TicketStatus =
+    (ticket?.status as TicketStatus) || TICKET_STATUS.UNUSED;
+
+  // Get event dates
+  const eventDate = ticket?.event_dates || event?.dates?.[0];
+  const eventStartAt = eventDate?.start_at
+    ? new Date(eventDate.start_at).toISOString()
+    : event?.start_time
+    ? new Date(event.start_time).toISOString()
+    : undefined;
+  const eventEndAt = eventDate?.end_at
+    ? new Date(eventDate.end_at).toISOString()
+    : event?.end_time
+    ? new Date(event.end_time).toISOString()
+    : undefined;
+  const checkInAt = ticket?.check_in_at
+    ? new Date(ticket.check_in_at).toISOString()
+    : null;
+
+  const handleConfirm = async () => {
+    if (!ticket?.id || ticketStatus !== TICKET_STATUS.UNUSED) {
+      Alert.alert("Lỗi", "Vé này không thể xác nhận.");
+      return;
+    }
+
+    setIsConfirming(true);
+
+    try {
+      const updatedTicketData = await ticketApi.confirmTicket(ticket.id);
+      setTicketData(updatedTicketData);
+      
+      Alert.alert("Thành công", "Vé đã được xác nhận thành công!", [
+        {
+          text: "OK",
+          onPress: () => navigation.goBack(),
+        },
+      ]);
+    } catch (error) {
+      const errorMessage = getErrorMessage(error);
+      Alert.alert("Lỗi", errorMessage);
+    } finally {
+      setIsConfirming(false);
+    }
   };
 
   const handleCancel = () => {
     navigation.goBack();
   };
-
-  // Safe access to ticket data with new QR structure // TODO: Implement API call to get ticket data
-  const eventName = ticketData?.eventName || "Tech Conference 2025";
-  const ticketTypeName =
-    ticketData?.ticketType || ticketData?.ticketTypeName || "Không có loại vé";
-  const serialNumber = ticketData?.serialNumber || "TK1762695358429A21LMH";
-  const ticketId = ticketData?.ticketId || "N/A";
-  const ticketStatus: TicketStatus =
-    ticketData?.ticketStatus || TICKET_STATUS.UNUSED;
-  const eventStartAt =
-    ticketData?.eventStartAt || "2025-11-04T13:06:25.000000Z";
-  const eventEndAt = ticketData?.eventEndAt || "2025-11-04T13:06:25.000000Z";
-  const checkInAt = ticketData?.checkInAt || null;
 
   return (
     <View style={styles.container}>
@@ -183,17 +219,21 @@ export default function TicketInfo({
           style={[styles.button, styles.confirmButton]}
           onPress={handleConfirm}
           activeOpacity={0.8}
-          disabled={ticketStatus !== TICKET_STATUS.UNUSED}
+          disabled={ticketStatus !== TICKET_STATUS.UNUSED || isConfirming}
         >
-          <Text
-            style={[
-              styles.confirmButtonText,
-              ticketStatus !== TICKET_STATUS.UNUSED &&
-                styles.confirmButtonTextDisabled,
-            ]}
-          >
-            Chấp nhận
-          </Text>
+          {isConfirming ? (
+            <ActivityIndicator size="small" color="white" />
+          ) : (
+            <Text
+              style={[
+                styles.confirmButtonText,
+                ticketStatus !== TICKET_STATUS.UNUSED &&
+                  styles.confirmButtonTextDisabled,
+              ]}
+            >
+              Chấp nhận
+            </Text>
+          )}
         </TouchableOpacity>
       </View>
     </View>
