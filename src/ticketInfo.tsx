@@ -58,6 +58,7 @@ export default function TicketInfo({
     (ticket?.status as TicketStatus) || TICKET_STATUS.UNUSED;
 
   // Get event dates
+  const eventLocation = event?.location || "N/A";
   const eventDate = ticket?.event_dates || event?.dates?.[0];
   const eventStartAt = eventDate?.start_at
     ? new Date(eventDate.start_at).toISOString()
@@ -186,6 +187,11 @@ export default function TicketInfo({
               <Text style={styles.detailValue}>{serialNumber}</Text>
             </View>
 
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Địa điểm:</Text>
+              <Text style={styles.detailValue}>{eventLocation}</Text>
+            </View>
+
             {checkInAt && (
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Đã check-in lúc:</Text>
@@ -283,7 +289,7 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   statusBadge: {
-    alignSelf: "flex-start",
+    alignSelf: "flex-end",
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderRadius: 20,
